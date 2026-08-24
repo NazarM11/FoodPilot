@@ -1,0 +1,9 @@
+fastapi
+httpx
+python-multipart
+python-dotenv
+llama-cloud
+uvicorn
+PyMuPDF
+Pillow
+pytesseract
