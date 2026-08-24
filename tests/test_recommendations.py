@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
 from llama_client import NutritionLabel
-from main import GoalInput, app, combo_fits, is_drink
+from main import GoalInput, app, combo_fits, is_condiment, is_drink
+from telegram_bot import format_response
 
 client = TestClient(app)
 
@@ -10,6 +11,9 @@ def test_is_drink_detects_frosty_and_other_drink_names():
     assert is_drink({"item_name": "Large Chocolate Frosty"}) is True
     assert is_drink({"item_name": "Diet Coke"}) is True
     assert is_drink({"item_name": "Classic Burger"}) is False
+    assert is_drink({"item_name": "Raisin Tea Biscuit"}) is False
+    assert is_condiment({"item_name": "Peanut Butter"}) is True
+    assert is_condiment({"item_name": "Raisin Tea Biscuit"}) is False
 
 
 def test_recommendations_returns_ranked_matches(monkeypatch):
@@ -161,6 +165,24 @@ def test_meal_response_never_uses_non_drink_as_drink(monkeypatch):
     assert "lemonade" in meal["drink"].lower()
 
 
+def test_telegram_response_omits_empty_meal_parts():
+    response = format_response({
+        "meal": {
+            "main": "Protein Latte - Large",
+            "side": None,
+            "drink": None,
+            "why_this_combo_fits": "This item stays closest to the requested calorie and macro targets.",
+        },
+        "totals": {"kcal": 300, "protein": 20, "carbs": 25, "fats": 10},
+        "items": [{"name": "Protein Latte - Large", "restaurant": "Tim Hortons"}],
+    })
+
+    assert "Main: Protein Latte - Large (Tim Hortons)" in response
+    assert "Side/add-on:" not in response
+    assert "Drink:" not in response
+    assert "one restaurant" not in response
+
+
 def test_combo_fits_uses_user_tight_tolerance_windows():
     goals = GoalInput(kcal=750, protein=60, carbs=60, fats=30)
     valid_combo = [
@@ -188,6 +210,7 @@ def test_nutrition_label_upload_saves_llama_result(monkeypatch):
     monkeypatch.setenv("ADMIN_INGEST_KEY", "test-admin-key")
     monkeypatch.setattr("main.extract_nutrition_label", lambda label_text: label)
     monkeypatch.setattr("main.parse_pdf", lambda pdf_bytes, filename: "Test Granola, 210 calories, 6g protein, 32g carbs, 8g fat")
+    monkeypatch.setattr("main.save_menu_items", lambda items: None)
 
     response = client.post(
         "/admin/nutrition-labels",

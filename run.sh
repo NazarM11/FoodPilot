@@ -17,6 +17,10 @@ case "${1:-}" in
     # Run the FastAPI app using uvicorn from the venv Python
     python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 "$@"
     ;;
+  telegram|bot)
+    shift
+    python "$PROJECT_DIR/telegram_bot.py" "$@"
+    ;;
   *)
     python "$PROJECT_DIR/main.py" "$@"
     ;;

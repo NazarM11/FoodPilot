@@ -8,9 +8,10 @@ FoodPilot is a FastAPI nutrition recommendation service. It reads menu items fro
 - `recommendation_engine.py` - nutrition scoring, meal roles, bundle generation, tolerance checks, and LLM ranking.
 - `database.py` - SQLite schema, initialization, and menu retrieval.
 - `llama_client.py` - PDF parsing and nutrition-label extraction for admin uploads.
-- `foodpilot.db` - current local menu database.
+- `foodpilot.db` - local menu database (ignored from GitHub; populate it through PDF ingestion).
 - `tests/test_recommendations.py` - regression tests for recommendation behavior.
 - `run.sh` - local launcher.
+- `telegram_bot.py` - Telegram bot client for the existing API.
 - `.env.example` - environment variable template.
 
 ## Setup
@@ -51,6 +52,23 @@ The engine first tries strict windows of +/-100 kcal, +/-5g protein, +/-10g carb
 PYTHONPATH=. pytest -q
 ```
 
+## Use Telegram
+
+Create a bot with `@BotFather` using `/newbot`, then put the token in `.env`:
+
+```text
+TELEGRAM_BOT_TOKEN=your-private-token
+```
+
+Start the API and bot in separate terminals:
+
+```bash
+./run.sh serve
+./run.sh telegram
+```
+
+In Telegram, send `/recommend 650 30 35 20`. You can also send `650 30 35 20` directly. The bot calls the existing local API, so it uses exactly the same database, AI ranking, fallback logic, and response behavior as Swagger and curl. No public URL or tunnel is needed.
+
 ## Import a nutrition PDF
 
 Set `ADMIN_INGEST_KEY` in `.env`, then send a PDF to the admin endpoint:
@@ -62,4 +80,8 @@ curl -X POST http://localhost:8000/admin/nutrition-labels \
   -F file=@path/to/menu.pdf
 ```
 
-The PDF parser requires the configured Llama Cloud key. The endpoint returns the extracted label data; database persistence should be handled by the ingestion workflow that calls this endpoint.
+The PDF parser requires the configured Llama Cloud key. Every extracted label is upserted into SQLite under the supplied restaurant name and is immediately available to recommendations.
+
+## Publish safely
+
+Before pushing to GitHub, confirm that `.env`, `foodpilot.db`, database backups, and `env/` are ignored. Publish `.env.example` instead of `.env`; it contains placeholders only. API keys and Telegram tokens must never be committed.

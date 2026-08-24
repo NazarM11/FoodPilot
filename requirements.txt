@@ -7,3 +7,4 @@ uvicorn
 PyMuPDF
 Pillow
 pytesseract
+python-telegram-bot

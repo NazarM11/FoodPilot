@@ -3,5 +3,8 @@
 !.env.example
 
 *.db
+*.db.backup-*
+env/
+.venv/
 __pycache__/
 .pytest_cache/

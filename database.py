@@ -137,3 +137,52 @@ def fetch_menu_items() -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+def save_menu_items(items: list[dict]) -> None:
+    conn = get_connection()
+    try:
+        for item in items:
+            restaurant = str(item.get("restaurant") or "Uploaded Labels").strip()
+            name = str(item.get("name") or item.get("item_name") or "").strip()
+            if not name:
+                continue
+            restaurant_row = conn.execute(
+                "SELECT id FROM restaurants WHERE name = ?",
+                (restaurant,),
+            ).fetchone()
+            if restaurant_row is None:
+                restaurant_id = conn.execute(
+                    "INSERT INTO restaurants (name) VALUES (?) RETURNING id",
+                    (restaurant,),
+                ).fetchone()[0]
+            else:
+                restaurant_id = restaurant_row[0]
+            conn.execute(
+                """
+                INSERT INTO menu_items
+                    (restaurant_id, item_name, category, calories, protein, carbs, fats, serving_size, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(restaurant_id, category, item_name) DO UPDATE SET
+                    calories = excluded.calories,
+                    protein = excluded.protein,
+                    carbs = excluded.carbs,
+                    fats = excluded.fats,
+                    serving_size = excluded.serving_size,
+                    source = excluded.source
+                """,
+                (
+                    restaurant_id,
+                    name,
+                    str(item.get("category") or ""),
+                    float(item.get("kcal") or item.get("calories") or 0),
+                    float(item.get("protein") or 0),
+                    float(item.get("carbs") or 0),
+                    float(item.get("fats") or 0),
+                    item.get("serving_size"),
+                    item.get("source"),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()

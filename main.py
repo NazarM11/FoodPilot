@@ -4,7 +4,7 @@ import secrets
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 
-from database import fetch_menu_items, init_db
+from database import fetch_menu_items, init_db, save_menu_items
 from llama_client import (
     NutritionLabel,
     extract_nutrition_catalog,
@@ -18,6 +18,7 @@ from recommendation_engine import (
     build_meal_response,
     choose_combo,
     combo_fits,
+    is_condiment,
     is_drink,
     score_match,
     to_menu_item,
@@ -62,7 +63,7 @@ def recommend_items(payload: NutritionGoals):
                 "main": None,
                 "side": None,
                 "drink": None,
-                "why_this_combo_fits": "No valid meal bundle was found within the requested tolerance windows. Adjust the target calories/macros or add more menu options.",
+                "why_this_combo_fits": "No valid meal bundle was found within the requested tolerance windows. Please adjust your calorie or macro targets.",
             },
             "totals": {"kcal": 0, "protein": 0, "carbs": 0, "fats": 0},
         }
@@ -133,6 +134,7 @@ def ingest_nutrition_label(
     if not saved_items:
         raise HTTPException(status_code=422, detail="No usable nutrition entries were extracted from the uploaded PDF")
 
+    save_menu_items(saved_items)
     return saved_items[0]
 
 

@@ -74,6 +74,9 @@ def is_drink(item: dict) -> bool:
     name = item_name(item).lower()
     normalized_name = " ".join(filter(None, __import__("re").sub(r"[^a-z0-9]+", " ", name).split()))
     restaurant = str(item.get("restaurant") or "").lower()
+    food_exclusions = ("biscuit", "cookie", "muffin", "bagel", "donut", "pastry")
+    if any(marker in normalized_name.split() for marker in food_exclusions):
+        return False
     drink_markers = (
         "drink", "soda", "cola", "coke", "sprite", "tea", "lemonade", "milkshake", "coffee",
         "water", "juice", "frosty", "shake", "float", "iced tea", "sweet tea",
@@ -88,9 +91,21 @@ def is_drink(item: dict) -> bool:
     return "drink" in restaurant
 
 
+def is_condiment(item: dict) -> bool:
+    name = item_name(item).lower()
+    normalized_name = " ".join(filter(None, __import__("re").sub(r"[^a-z0-9]+", " ", name).split()))
+    markers = (
+        "sauce", "dressing", "dip", "ketchup", "mustard", "mayo", "mayonnaise",
+        "gravy", "peanut butter", "jam", "jelly", "syrup", "spread",
+    )
+    return any(marker in normalized_name for marker in markers)
+
+
 def item_role(item: dict) -> str:
     if is_drink(item):
         return "drink"
+    if is_condiment(item):
+        return "condiment"
     protein = item_value(item, "protein")
     carbs = item_value(item, "carbs")
     kcal = item_value(item, "kcal")
@@ -201,7 +216,7 @@ def generate_combo_candidates(
     candidates = []
 
     for restaurant_items in restaurant_groups:
-        food_pool = [item for item in restaurant_items if not is_drink(item)]
+        food_pool = [item for item in restaurant_items if not is_drink(item) and not is_condiment(item)]
         if not food_pool:
             continue
 
@@ -326,7 +341,7 @@ def build_meal_response(items: list[dict], goals: GoalInput) -> dict:
                 "main": None,
                 "side": None,
                 "drink": None,
-                "why_this_combo_fits": "No valid meal was found for the provided goals.",
+                "why_this_combo_fits": "No valid meal bundle was found within the requested tolerance windows. Please adjust your calorie or macro targets.",
             },
             "totals": {"kcal": 0, "protein": 0, "carbs": 0, "fats": 0},
         }
@@ -353,13 +368,20 @@ def build_meal_response(items: list[dict], goals: GoalInput) -> dict:
         "main": main.get("item_name") if main else None,
         "side": side.get("item_name") if side else None,
         "drink": drink.get("item_name") if drink else None,
-        "why_this_combo_fits": "This bundle keeps the meal in one restaurant, includes a drink, and balances the target nutrition goals as closely as possible.",
+        "why_this_combo_fits": "This recommendation balances the target nutrition goals as closely as possible.",
     }
     if goals.kcal is not None or goals.protein is not None or goals.carbs is not None or goals.fats is not None:
-        meal["why_this_combo_fits"] = (
-            "This bundle stays within the same restaurant, adds a drink, and prioritizes a realistic main + side/add-on structure "
-            "while staying closest to the requested calorie and macro targets."
-        )
+        if len(items) == 1:
+            reasons = ["This item stays closest to the requested calorie and macro targets"]
+        else:
+            reasons = ["This bundle stays in one restaurant"]
+        if side:
+            reasons.append("includes a side/add-on")
+        if drink:
+            reasons.append("includes a drink")
+        if len(items) > 1:
+            reasons.append("and stays closest to the requested calorie and macro targets")
+        meal["why_this_combo_fits"] = ", ".join(reasons) + "."
 
     totals = {
         "kcal": round(sum(item_value(item, "kcal") for item in items), 1),
