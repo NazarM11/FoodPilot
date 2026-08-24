@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 import httpx
 from dotenv import load_dotenv
@@ -22,13 +23,34 @@ async def recommendation_for(goals: dict) -> dict:
 
 def parse_goals(text: str) -> dict:
     values = text.replace(",", " ").split()
-    if len(values) != 4:
-        raise ValueError("Enter four numbers: kcal protein carbs fats")
-    try:
-        kcal, protein, carbs, fats = (float(value) for value in values)
-    except ValueError as exc:
-        raise ValueError("All four goals must be numbers") from exc
-    return {"kcal": kcal, "protein": protein, "carbs": carbs, "fats": fats}
+    if len(values) == 4:
+        try:
+            kcal, protein, carbs, fats = (float(value) for value in values)
+        except ValueError as exc:
+            raise ValueError("All four goals must be numbers") from exc
+        return {"kcal": kcal, "protein": protein, "carbs": carbs, "fats": fats}
+
+    patterns = {
+        "kcal": r"(?:max(?:imum)?\s*)?(\d+(?:\.\d+)?)\s*(?:kcal|calories?|cals?)|(?:kcal|calories?|cals?)\s*(?:max(?:imum)?\s*)?(\d+(?:\.\d+)?)",
+        "protein": r"(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?\s*protein|protein\s*(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?",
+        "carbs": r"(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?\s*(?:carbs?|carbohydrates?)|(?:carbs?|carbohydrates?)\s*(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?",
+        "fats": r"(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?\s*fats?|fats?\s*(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?",
+    }
+    goals = {}
+    for field_name, pattern in patterns.items():
+        match = re.search(pattern, text.lower())
+        if match:
+            goals[field_name] = float(next(group for group in match.groups() if group is not None))
+    lowered = text.lower()
+    if "carbs" not in goals and re.search(r"not (?:to|too) (?:much|many)\s+(?:carbs?|carbohydrates?)|not much\s+(?:carbs?|carbohydrates?)", lowered):
+        goals["carbs"] = 40.0
+    if "fats" not in goals and re.search(r"not too much\s+fats?", lowered):
+        goals["fats"] = 20.0
+    if re.search(r"as much protein as possible|maximum protein|highest protein|high protein|plenty of protein|lots of protein|more protein", lowered):
+        goals["maximize_protein"] = True
+    if not goals:
+        raise ValueError("Tell me your goals, for example: max 700 calories and preferably 40g protein")
+    return goals
 
 
 def format_response(result: dict) -> str:
@@ -65,21 +87,19 @@ def format_response(result: dict) -> str:
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "Welcome to FoodPilot! 🍔🤖\n\n"
-        "Your AI-powered food recommendation assistant.\n\n"
-        "FoodPilot searches meals across **6 popular restaurants** and finds options that match your calorie and macro goals:\n\n"
+        "Your AI food recommendation assistant.\n\n"
+        "Tell me what you want in your own words. I search across **6 popular restaurants**:\n\n"
         "**A&W · Popeyes · Taco Bell · Wendy's · McDonald's · Tim Hortons**\n\n"
-        "Try:\n\n"
-        "`/recommend 650 30 35 20`\n\n"
-        "*(kcal · protein · carbs · fats)*",
+            "Just tell me what you want, for example:\n\n"
+            "I want something under 700 calories with plenty of protein and not too much fat.",
         parse_mode="Markdown",
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "Use /recommend kcal protein carbs fats\n"
-        "Example: /recommend 650 30 35 20\n\n"
-        "You can also send the four numbers directly: 650 30 35 20"
+        "Tell me what kind of meal you want in your own words.\n\n"
+        "Example: I want something under 700 calories with plenty of protein and not too much fat."
     )
 
 
@@ -100,7 +120,7 @@ async def plain_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         result = await recommendation_for(goals)
         await update.message.reply_text(format_response(result))
     except ValueError:
-        await update.message.reply_text("Use four values: kcal protein carbs fats\nExample: 650 30 35 20")
+        await update.message.reply_text("Tell me what you want, for example: something under 700 calories with plenty of protein and not too much fat.")
     except httpx.HTTPError:
         await update.message.reply_text("FoodPilot is temporarily unavailable. Please try again later.")
 

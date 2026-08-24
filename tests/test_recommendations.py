@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from llama_client import NutritionLabel
 from main import GoalInput, app, combo_fits, is_condiment, is_drink
-from telegram_bot import format_response
+from telegram_bot import format_response, parse_goals
 
 client = TestClient(app)
 
@@ -13,7 +13,9 @@ def test_is_drink_detects_frosty_and_other_drink_names():
     assert is_drink({"item_name": "Classic Burger"}) is False
     assert is_drink({"item_name": "Raisin Tea Biscuit"}) is False
     assert is_condiment({"item_name": "Peanut Butter"}) is True
+    assert is_condiment({"item_name": "Butter"}) is True
     assert is_condiment({"item_name": "Raisin Tea Biscuit"}) is False
+    assert is_drink({"item_name": "Protein Iced Latte"}) is True
 
 
 def test_recommendations_returns_ranked_matches(monkeypatch):
@@ -98,7 +100,7 @@ def test_recommendations_prefers_main_plus_side_plus_drink(monkeypatch):
 
     response = client.post(
         "/recommendations",
-        json={"goals": {"kcal": 750, "protein": 60, "carbs": 60, "fats": 30}},
+        json={"goals": {"kcal": 800, "protein": 60, "carbs": 60, "fats": 30}},
     )
 
     assert response.status_code == 200
@@ -154,7 +156,7 @@ def test_meal_response_never_uses_non_drink_as_drink(monkeypatch):
 
     response = client.post(
         "/recommendations",
-        json={"goals": {"kcal": 900, "protein": 30, "carbs": 100, "fats": 30}},
+        json={"goals": {"kcal": 1300, "protein": 35, "carbs": 140, "fats": 50}},
     )
 
     assert response.status_code == 200
@@ -181,6 +183,34 @@ def test_telegram_response_omits_empty_meal_parts():
     assert "Side/add-on:" not in response
     assert "Drink:" not in response
     assert "one restaurant" not in response
+
+
+def test_parse_goals_accepts_natural_language():
+    assert parse_goals("I want something for max 700 cals with preferably 40 protein and not too much carbs") == {
+        "kcal": 700.0,
+        "protein": 40.0,
+        "carbs": 40.0,
+    }
+
+
+def test_parse_goals_accepts_maximum_protein_request():
+    assert parse_goals("Something under 600 cals, as much protein as possible, not too much carbs") == {
+        "kcal": 600.0,
+        "carbs": 40.0,
+        "maximize_protein": True,
+    }
+
+
+def test_parse_goals_handles_carbs_typo():
+    assert parse_goals("Something under 600 cals, as much protein as possible, not to much carbs")["carbs"] == 40.0
+
+
+def test_parse_goals_understands_plain_language_protein_preference():
+    assert parse_goals("something under 700 calories with plenty of protein and not too much fat") == {
+        "kcal": 700.0,
+        "fats": 20.0,
+        "maximize_protein": True,
+    }
 
 
 def test_combo_fits_uses_user_tight_tolerance_windows():

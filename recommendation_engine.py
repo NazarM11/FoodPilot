@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from typing import Optional
 
 import httpx
@@ -17,6 +18,7 @@ class GoalInput(BaseModel):
     protein: Optional[float] = Field(default=None, gt=0)
     carbs: Optional[float] = Field(default=None, gt=0)
     fats: Optional[float] = Field(default=None, gt=0)
+    maximize_protein: bool = False
 
 
 class NutritionGoals(BaseModel):
@@ -79,7 +81,8 @@ def is_drink(item: dict) -> bool:
         return False
     drink_markers = (
         "drink", "soda", "cola", "coke", "sprite", "tea", "lemonade", "milkshake", "coffee",
-        "water", "juice", "frosty", "shake", "float", "iced tea", "sweet tea",
+        "latte", "cappuccino", "espresso", "smoothie", "water", "juice", "frosty", "shake", "float",
+        "iced tea", "sweet tea",
     )
     for marker in drink_markers:
         if " " in marker:
@@ -96,7 +99,7 @@ def is_condiment(item: dict) -> bool:
     normalized_name = " ".join(filter(None, __import__("re").sub(r"[^a-z0-9]+", " ", name).split()))
     markers = (
         "sauce", "dressing", "dip", "ketchup", "mustard", "mayo", "mayonnaise",
-        "gravy", "peanut butter", "jam", "jelly", "syrup", "spread",
+        "gravy", "peanut butter", "jam", "jelly", "syrup", "spread", "butter", "margarine",
     )
     return any(marker in normalized_name for marker in markers)
 
@@ -145,7 +148,7 @@ def combo_fits(
         if target is None:
             continue
         actual = totals[field_name]
-        if abs(actual - target) > max_delta:
+        if actual > target or actual < target - max_delta:
             return False
     return True
 
@@ -174,6 +177,9 @@ def combo_score(goals: GoalInput, items: list[dict]) -> float:
         if field_name == "carbs" and actual < target * 0.75:
             final_score -= 25.0
         final_score -= abs(actual - target) / target * (100.0 * weight)
+
+    if goals.maximize_protein:
+        final_score += totals["protein"] * 2.0
 
     if drink_count == 0:
         final_score -= 40.0
@@ -324,7 +330,7 @@ def choose_combo(items: list[dict], goals: GoalInput) -> list[dict]:
     if not candidates:
         return []
 
-    llm_choice = rank_combo_with_llm(candidates, goals)
+    llm_choice = None if goals.maximize_protein else rank_combo_with_llm(candidates, goals)
     if llm_choice is not None:
         llm_choice = sorted(llm_choice, key=lambda item: score_match(to_menu_item(item), goals), reverse=True)
         return llm_choice[:3]
