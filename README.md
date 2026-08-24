@@ -111,12 +111,10 @@ Extracted labels are upserted into SQLite and immediately available to the recom
 
 ## What I'd build next
 
-- Migrate persistence from SQLite to PostgreSQL with type-safe queries (sqlc) for production readiness
-- Add JWT-based authentication (Argon2id hashing) to protect the admin ingestion endpoint properly
-- Move background work (PDF ingestion, LLM ranking calls) onto RabbitMQ so user-facing requests stay responsive
-- Containerize with Docker for reproducible deployment
-- Caching for LLM ranking calls to reduce latency/cost on repeat queries
-- Structured logging around the fallback path to track LLM reliability in production
+- Build a user-facing web frontend for nutrition goals and recommendations
+- Add more restaurant menus and keep expanding the nutrition database
+- Improve menu normalization and duplicate detection as new PDFs are imported
+- Add filters for restaurant, meal type, dietary preferences, and allergens
 
 ---
 
