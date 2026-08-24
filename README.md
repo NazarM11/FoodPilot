@@ -124,7 +124,5 @@ Extracted labels are upserted into SQLite and immediately available to the recom
 
 **Nazar Marynich** — Backend Developer (Go, Python, REST APIs, PostgreSQL/SQLite, Clean Architecture)
 
-- GitHub: [github.com/NazarM11](https://github.com/NazarM11)
 - LinkedIn: [linkedin.com/in/nazar-marynich-a488473b7](https://linkedin.com/in/nazar-marynich-a488473b7)
 - Email: marynich.nazar1@gmail.com
-- Bradford, Ontario, Canada
