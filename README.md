@@ -1,41 +1,51 @@
 # FoodPilot
 
-FoodPilot is a FastAPI nutrition recommendation service. It reads menu items from SQLite, builds realistic meal bundles, and optionally uses an OpenAI-compatible LLM endpoint to rank valid bundles. If the LLM is unavailable or returns invalid output, the local heuristic ranking is used.
+**A production-style nutrition recommendation API built with FastAPI, SQLite, and LLM-based ranking — with a graceful, fully-local fallback when the LLM is unavailable.**
 
-## Project layout
+FoodPilot takes a user's macro goals (calories, protein, carbs, fats) and returns realistic, restaurant-accurate meal bundles — not generic "eat chicken and rice" suggestions, but combinations built from real menu items (main + side/add-on + drink) pulled from an ingested nutrition database.
 
-- `main.py` - FastAPI web layer and endpoints.
-- `recommendation_engine.py` - nutrition scoring, meal roles, bundle generation, tolerance checks, and LLM ranking.
-- `database.py` - SQLite schema, initialization, and menu retrieval.
-- `llama_client.py` - PDF parsing and nutrition-label extraction for admin uploads.
-- `foodpilot.db` - local menu database (ignored from GitHub; populate it through PDF ingestion).
-- `tests/test_recommendations.py` - regression tests for recommendation behavior.
-- `run.sh` - local launcher.
-- `telegram_bot.py` - Telegram bot client for the existing API.
-- `.env.example` - environment variable template.
+Live demo: message **[@fastmacros_bot](https://t.me/fastmacros_bot)** on Telegram and send `650 30 35 20` (kcal, protein, carbs, fats).
 
-## Setup
+---
 
-From the project directory:
+## Why this project is interesting
+
+This isn't a CRUD wrapper around an LLM call. The core engineering problem is **reliability under uncertain conditions**:
+
+- **LLM ranking with a deterministic fallback.** The recommendation engine tries an OpenAI-compatible LLM to rank candidate bundles by quality/relevance. If the LLM is unreachable, times out, or returns malformed output, the system silently falls back to a local heuristic ranker — no degraded UX, no crash, no hallucinated data reaching the user.
+- **Two-tier tolerance matching.** Bundles are first matched within strict macro windows (±100 kcal, ±5g protein, ±10g carbs, ±5g fat). If nothing fits, the search automatically relaxes to wider windows (±150 kcal, ±8g protein, ±15g carbs, ±8g fat) rather than returning an empty result.
+- **Structured bundle generation, not random pairing.** The engine understands meal *roles* (main, side/add-on, drink) and prefers coherent, single-restaurant combinations over mixing items arbitrarily.
+- **Same core logic across every interface.** The Telegram bot doesn't reimplement anything — it calls the same local API used by Swagger/curl, guaranteeing identical behavior (ranking, fallback, tolerance logic) across all clients.
+- **Real data ingestion pipeline.** Menu data isn't hardcoded — nutrition labels are extracted from restaurant PDFs via an LLM-based parser and upserted into SQLite through an authenticated admin endpoint.
+
+---
+
+## Architecture
+
+```
+main.py                    → FastAPI web layer, routes, request/response models
+recommendation_engine.py   → scoring, meal-role logic, bundle generation, tolerance checks, LLM ranking + fallback
+database.py                → SQLite schema, initialization, menu retrieval
+llama_client.py            → PDF parsing and nutrition-label extraction (admin ingestion)
+telegram_bot.py            → Telegram client, calls the existing API (no duplicated logic)
+tests/test_recommendations.py → regression tests for recommendation behavior
+```
+
+**Stack:** Python, FastAPI, SQLite, OpenAI-compatible LLM API, Llama Cloud (PDF parsing), python-telegram-bot, pytest.
+
+---
+
+## Quickstart
 
 ```bash
 python3 -m venv env
 . env/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
-```
-
-The existing `env/` can be reused if it is already installed. Edit `.env` only when you want LLM ranking or PDF ingestion; the local heuristic recommender works without an LLM key.
-
-## Run the API
-
-```bash
 ./run.sh serve
 ```
 
-The API is available at `http://localhost:8000`. Interactive API documentation is at `http://localhost:8000/docs`.
-
-## Try a recommendation
+API docs: `http://localhost:8000/docs`
 
 ```bash
 curl -X POST http://localhost:8000/recommendations \
@@ -43,35 +53,35 @@ curl -X POST http://localhost:8000/recommendations \
   -d '{"goals":{"kcal":650,"protein":30,"carbs":35,"fats":20}}'
 ```
 
-The engine first tries strict windows of +/-100 kcal, +/-5g protein, +/-10g carbs, and +/-5g fat. If no bundle fits, it retries with +/-150 kcal, +/-8g protein, +/-15g carbs, and +/-8g fat. It uses the complete menu database, prefers one restaurant, and prefers a main, side/add-on, and drink when the data supports that structure.
+The LLM key in `.env` is optional — the API is fully functional on the local heuristic recommender without it.
 
-## Run tests
+---
+
+## Testing
 
 ```bash
 . env/bin/activate
 PYTHONPATH=. pytest -q
 ```
 
-## Use Telegram
+Regression tests cover recommendation correctness, including fallback behavior when the LLM path is unavailable.
 
-Create a bot with `@BotFather` using `/newbot`, then put the token in `.env`:
+---
 
-```text
-TELEGRAM_BOT_TOKEN=your-private-token
-```
-
-Start the API and bot in separate terminals:
+## Telegram bot
 
 ```bash
 ./run.sh serve
 ./run.sh telegram
 ```
 
-In Telegram, send `/recommend 650 30 35 20`. You can also send `650 30 35 20` directly. The bot calls the existing local API, so it uses exactly the same database, AI ranking, fallback logic, and response behavior as Swagger and curl. No public URL or tunnel is needed.
+Send `/recommend 650 30 35 20` or just `650 30 35 20` — same database, same ranking, same fallback logic as the raw API.
 
-## Import a nutrition PDF
+Try it live: **[@fastmacros_bot](https://t.me/fastmacros_bot)**
 
-Set `ADMIN_INGEST_KEY` in `.env`, then send a PDF to the admin endpoint:
+---
+
+## Admin: ingesting a menu PDF
 
 ```bash
 curl -X POST http://localhost:8000/admin/nutrition-labels \
@@ -80,8 +90,21 @@ curl -X POST http://localhost:8000/admin/nutrition-labels \
   -F file=@path/to/menu.pdf
 ```
 
-The PDF parser requires the configured Llama Cloud key. Every extracted label is upserted into SQLite under the supplied restaurant name and is immediately available to recommendations.
+Extracted labels are upserted into SQLite and immediately available to the recommendation engine — no restart needed.
 
-## Publish safely
+---
 
-Before pushing to GitHub, confirm that `.env`, `foodpilot.db`, database backups, and `env/` are ignored. Publish `.env.example` instead of `.env`; it contains placeholders only. API keys and Telegram tokens must never be committed.
+## Security notes
+
+- `.env`, `foodpilot.db`, database backups, and `env/` are gitignored.
+- Only `.env.example` (placeholders only) is committed.
+- API keys and Telegram tokens are never checked into source control.
+- Admin ingestion is gated behind an `X-Admin-Key` header.
+
+---
+
+## What I'd build next
+
+- Caching for LLM ranking calls to reduce latency/cost on repeat queries
+- Structured logging around the fallback path to track LLM reliability in production
+- Multi-restaurant bundle support with configurable weighting
