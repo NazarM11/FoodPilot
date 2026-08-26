@@ -18,6 +18,42 @@ def test_is_drink_detects_frosty_and_other_drink_names():
     assert is_drink({"item_name": "Protein Iced Latte"}) is True
 
 
+def test_is_drink_covers_milk_and_cafe_drinks():
+    assert is_drink({"item_name": "1% Partly Skimmed Milk - 250 ml"}) is True
+    assert is_drink({"item_name": "Kid's Milk"}) is True
+    assert is_drink({"item_name": "Chocolate Milk"}) is True
+    assert is_drink({"item_name": "Hot Chocolate - Medium"}) is True
+    assert is_drink({"item_name": "White Hot Chocolate - Large"}) is True
+    assert is_drink({"item_name": "Original Cold Brew - Small"}) is True
+    assert is_drink({"item_name": "Original Iced Capp - Large"}) is True
+    assert is_drink({"item_name": "Mocha Iced Capp - Medium"}) is True
+    assert is_drink({"item_name": "Americano - Medium"}) is True
+    assert is_drink({"item_name": "Mocha"}) is True
+    assert is_drink({"item_name": "Freeze, Root Beer, 20oz"}) is True
+    assert is_drink({"item_name": "Canada Dry Ginger Ale"}) is True
+    assert is_drink({"item_name": "Fanta Orange"}) is True
+    assert is_drink({"item_name": "Blueberry Pomegranate Protein Smoothie - Small"}) is True
+    assert is_drink({"item_name": "Banana Chocolate Chunk Muffin"}) is False
+    assert is_drink({"item_name": "Chocolate Caramel RMHC Cookie"}) is False
+    assert is_drink({"item_name": "Hot Fudge Sundae"}) is False
+    assert is_drink({"item_name": "Chocolate Cone - Kids 4oz"}) is False
+    assert is_drink({"item_name": "Chocolate Glazed Donut"}) is False
+    assert is_drink({"item_name": "Mocha Syrup"}) is False
+    assert is_drink({"item_name": "Chocolate Croissant"}) is False
+
+
+def test_meal_response_never_puts_drink_in_main_or_side():
+    from recommendation_engine import build_meal_response
+    smoothie = {"item_name": "Blueberry Pomegranate Protein Smoothie - Small", "calories": 260, "protein": 13, "carbs": 50, "fats": 1.5}
+    milk = {"item_name": "1% Partly Skimmed Milk - 250 ml", "calories": 110, "protein": 9, "carbs": 12, "fats": 2.5}
+    result = build_meal_response([smoothie, milk], GoalInput(kcal=380, protein=24))
+    meal = result["meal"]
+    assert meal["main"] != smoothie["item_name"]
+    assert meal["side"] != smoothie["item_name"]
+    assert meal["main"] != milk["item_name"]
+    assert meal["side"] != milk["item_name"]
+
+
 def test_recommendations_returns_ranked_matches(monkeypatch):
     monkeypatch.setattr(
         "main.fetch_menu_items",
@@ -211,6 +247,56 @@ def test_parse_goals_understands_plain_language_protein_preference():
         "fats": 20.0,
         "maximize_protein": True,
     }
+
+
+def test_parse_goals_accepts_abbreviated_macros():
+    assert parse_goals("300 cals, 20 prot") == {"kcal": 300.0, "protein": 20.0}
+
+
+def test_parse_goals_accepts_positional_shorthand():
+    assert parse_goals("700 40 30 20") == {"kcal": 700.0, "protein": 40.0, "carbs": 30.0, "fats": 20.0}
+    assert parse_goals("700/40/30") == {"kcal": 700.0, "protein": 40.0, "carbs": 30.0}
+
+
+def test_parse_goals_too_much_and_not_much_variants():
+    assert parse_goals("too much carbs") == {"carbs": 40.0}
+    assert parse_goals("not much fat") == {"fats": 20.0}
+    assert parse_goals("way too much fat") == {"fats": 20.0}
+    assert parse_goals("not that much carbs") == {"carbs": 40.0}
+    assert parse_goals("without too many carbs") == {"carbs": 40.0}
+    assert parse_goals("too many calories") == {"kcal": 700.0}
+
+
+def test_parse_goals_qualitative_phrases():
+    assert parse_goals("go easy on the carbs") == {"carbs": 40.0}
+    assert parse_goals("watch my fat") == {"fats": 20.0}
+    assert parse_goals("cutting back on carbs") == {"carbs": 40.0}
+    assert parse_goals("low carb") == {"carbs": 40.0}
+    assert parse_goals("keto") == {"carbs": 40.0}
+    assert parse_goals("something light") == {"kcal": 700.0}
+    assert parse_goals("a little fat") == {"fats": 20.0}
+
+
+def test_parse_goals_protein_priority_synonyms():
+    assert parse_goals("light on fat, lots of protein") == {"fats": 20.0, "maximize_protein": True}
+    assert parse_goals("protein packed") == {"maximize_protein": True}
+    assert parse_goals("post-workout meal") == {"maximize_protein": True}
+    assert parse_goals("building muscle") == {"maximize_protein": True}
+
+
+def test_parse_goals_numbers_override_qualitative():
+    assert parse_goals("50g carbs, not too much fat") == {"carbs": 50.0, "fats": 20.0}
+    assert parse_goals("under 500 calories, something light") == {"kcal": 500.0}
+
+
+def test_parse_goals_rejects_unparsable_text():
+    for text in ("hello there", "I am hungry", "not too much"):
+        try:
+            parse_goals(text)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"expected ValueError for {text!r}")
 
 
 def test_combo_fits_uses_user_tight_tolerance_windows():

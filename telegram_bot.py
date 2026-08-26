@@ -21,35 +21,132 @@ async def recommendation_for(goals: dict) -> dict:
         return response.json()
 
 
+_KCAL_WORDS = r"(?:kcal|kcals?|cal(?:orie)?s?|cals?)"
+_PROTEIN_WORDS = r"(?:proteins?|prots?)"
+_CARB_WORDS = r"(?:carb(?:ohydrate)?s?|carbs?)"
+_FAT_WORDS = r"(?:fats?|lipids?)"
+
+_NUMBER_PATTERNS = {
+    "kcal": (
+        rf"(?:max(?:imum)?|under|below|less than|no more than|at most|around|about|up to)\s*(\d+(?:\.\d+)?)\s*{_KCAL_WORDS}",
+        rf"(\d+(?:\.\d+)?)\s*{_KCAL_WORDS}",
+        rf"{_KCAL_WORDS}\s*(?:max(?:imum)?|under|below|less than|no more than|at most|around|about|up to)?\s*(\d+(?:\.\d+)?)",
+    ),
+    "protein": (
+        rf"(?:preferably|about|around|at least|minimum(?: of)?|over|more than|up to|max(?:imum)?|under)\s*(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?\s*(?:of\s+)?)?{_PROTEIN_WORDS}",
+        rf"(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?\s*(?:of\s+)?)?{_PROTEIN_WORDS}",
+        rf"{_PROTEIN_WORDS}\s*(?:preferably|about|around|at least|over|more than|up to|max(?:imum)?|under)?\s*(\d+(?:\.\d+)?)\s*(?:g|grams?)?",
+    ),
+    "carbs": (
+        rf"(?:preferably|about|around|max(?:imum)?|under|below|less than|no more than|at most|up to)\s*(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?\s*(?:of\s+)?)?{_CARB_WORDS}",
+        rf"(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?\s*(?:of\s+)?)?{_CARB_WORDS}",
+        rf"{_CARB_WORDS}\s*(?:preferably|about|around|max(?:imum)?|under|below|less than|no more than|at most|up to)?\s*(\d+(?:\.\d+)?)\s*(?:g|grams?)?",
+    ),
+    "fats": (
+        rf"(?:preferably|about|around|max(?:imum)?|under|below|less than|no more than|at most|up to)\s*(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?\s*(?:of\s+)?)?{_FAT_WORDS}",
+        rf"(\d+(?:\.\d+)?)\s*(?:g(?:rams?)?\s*(?:of\s+)?)?{_FAT_WORDS}",
+        rf"{_FAT_WORDS}\s*(?:preferably|about|around|max(?:imum)?|under|below|less than|no more than|at most|up to)?\s*(\d+(?:\.\d+)?)\s*(?:g|grams?)?",
+    ),
+}
+
+_FILLER = r"(?:(?:the|my|our|your|on|of|in|it)\s+)*"
+_MODERATE = (
+    r"not\s+(?:to+|too)\s+(?:much|many)",
+    r"not\s+(?:that|so)\s+(?:much|many)",
+    r"not\s+much",
+    r"too\s+(?:much|many)",
+    r"way\s+too\s+(?:much|many)",
+    r"not\s+a\s+lot\s+of",
+    r"a\s+little",
+    r"a\s+bit\s+of",
+    r"low(?:er)?(?:\s+on)?",
+    r"light\s+on",
+    r"go\s+easy\s+on",
+    r"easy\s+on",
+    r"watch(?:ing)?\s+(?:my|the)",
+    r"cut(?:ting)?\s+(?:back|down)(?:\s+on)?",
+    r"limit(?:ing)?",
+    r"keep\s+(?:it\s+)?low(?:\s+on)?",
+    r"without\s+too\s+(?:much|many)",
+    r"minimal",
+    r"moderate",
+)
+_MODERATE_RE = "|".join(f"(?:{phrase})" for phrase in _MODERATE)
+
+_QUALITATIVE_LIMITS = (
+    ("carbs", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_CARB_WORDS}\b|{_CARB_WORDS}\s*-?\s*(?:free|conscious)|\bketo\b|\blow\s*carb", 40.0),
+    ("fats", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_FAT_WORDS}\b|\blow\s*fat\b|\blean\b", 20.0),
+    ("kcal", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_KCAL_WORDS}\b|light\s+(?:meal|something)|small\s+meal|something\s+light|not\s+too\s+(?:heavy|big)", 700.0),
+)
+
+_PROTEIN_PRIORITY = (
+    r"as\s+much\s+protein\s+as\s+possible",
+    r"max(?:imum|imize)?\s+protein",
+    r"highest\s+protein",
+    r"high\s+protein",
+    r"plenty\s+of\s+protein",
+    r"lots?\s+of\s+protein",
+    r"a\s+lot\s+of\s+protein",
+    r"more\s+protein",
+    r"protein[-\s]?(?:heavy|rich|packed|focused)",
+    r"protein\s+heavy",
+    r"loaded\s+with\s+protein",
+    r"full\s+of\s+protein",
+    r"good\s+(?:amount\s+of\s+|source\s+of\s+)protein",
+    r"decent\s+(?:amount\s+of\s+)protein",
+    r"protein\s+please",
+    r"extra\s+protein",
+    r"big\s+on\s+protein",
+    r"post[-\s]?workout",
+    r"(?:build(?:ing)?|gain(?:ing|s)?)\s+muscle",
+    r"muscle\s+(?:building|gain)",
+)
+_PROTEIN_PRIORITY_RE = "|".join(f"(?:{phrase})" for phrase in _PROTEIN_PRIORITY)
+
+
 def parse_goals(text: str) -> dict:
     values = text.replace(",", " ").split()
-    if len(values) == 4:
-        try:
-            kcal, protein, carbs, fats = (float(value) for value in values)
-        except ValueError as exc:
-            raise ValueError("All four goals must be numbers") from exc
+    if len(values) == 4 and all(re.fullmatch(r"\d+(?:\.\d+)?", value) for value in values):
+        kcal, protein, carbs, fats = (float(value) for value in values)
         return {"kcal": kcal, "protein": protein, "carbs": carbs, "fats": fats}
 
-    patterns = {
-        "kcal": r"(?:max(?:imum)?\s*)?(\d+(?:\.\d+)?)\s*(?:kcal|calories?|cals?)|(?:kcal|calories?|cals?)\s*(?:max(?:imum)?\s*)?(\d+(?:\.\d+)?)",
-        "protein": r"(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?\s*protein|protein\s*(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?",
-        "carbs": r"(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?\s*(?:carbs?|carbohydrates?)|(?:carbs?|carbohydrates?)\s*(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?",
-        "fats": r"(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?\s*fats?|fats?\s*(?:preferably\s*)?(\d+(?:\.\d+)?)\s*g?",
-    }
-    goals = {}
-    for field_name, pattern in patterns.items():
-        match = re.search(pattern, text.lower())
-        if match:
-            goals[field_name] = float(next(group for group in match.groups() if group is not None))
     lowered = text.lower()
-    if "carbs" not in goals and re.search(r"not (?:to|too) (?:much|many)\s+(?:carbs?|carbohydrates?)|not much\s+(?:carbs?|carbohydrates?)", lowered):
-        goals["carbs"] = 40.0
-    if "fats" not in goals and re.search(r"not too much\s+fats?", lowered):
-        goals["fats"] = 20.0
-    if re.search(r"as much protein as possible|maximum protein|highest protein|high protein|plenty of protein|lots of protein|more protein", lowered):
+
+    goals = {}
+    for field_name, patterns in _NUMBER_PATTERNS.items():
+        for pattern in patterns:
+            match = re.search(pattern, lowered)
+            if match:
+                goals[field_name] = float(next(group for group in match.groups() if group is not None))
+                break
+
+    if "kcal" not in goals:
+        compact = re.sub(r"[,/|;]+", " ", lowered)
+        stripped = re.sub(
+            rf"{_KCAL_WORDS}|{_PROTEIN_WORDS}|{_CARB_WORDS}|{_FAT_WORDS}|g(?:rams?)?",
+            " ",
+            compact,
+        )
+        tokens = stripped.split()
+        if tokens and all(re.fullmatch(r"\d+(?:\.\d+)?", token) for token in tokens):
+            numbers = [float(token) for token in tokens]
+            fields = ("kcal", "protein", "carbs", "fats")
+            if 2 <= len(numbers) <= 4:
+                for field_name, number in zip(fields, numbers):
+                    goals.setdefault(field_name, number)
+
+    for field_name, pattern, ceiling in _QUALITATIVE_LIMITS:
+        if field_name not in goals and re.search(pattern, lowered):
+            goals[field_name] = ceiling
+
+    if re.search(_PROTEIN_PRIORITY_RE, lowered):
         goals["maximize_protein"] = True
+
     if not goals:
-        raise ValueError("Tell me your goals, for example: max 700 calories and preferably 40g protein")
+        raise ValueError(
+            "Tell me your goals, for example: max 700 calories and preferably 40g protein, "
+            "or something like \"not too much carbs, plenty of protein\""
+        )
     return goals
 
 
@@ -114,13 +211,23 @@ async def recommend(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("FoodPilot is temporarily unavailable. Please try again later.")
 
 
+_HELP_TEXT = (
+    "Tell me what you want in your own words. For example:\n\n"
+    "• something under 700 calories with plenty of protein and not too much fat\n"
+    "• 300 cals, 20 prot\n"
+    "• low carb, protein packed\n"
+    "• 700 40 30 20  (kcal / protein / carbs / fat)\n"
+    "• go easy on the carbs, post-workout meal"
+)
+
+
 async def plain_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         goals = parse_goals(update.message.text or "")
         result = await recommendation_for(goals)
         await update.message.reply_text(format_response(result))
     except ValueError:
-        await update.message.reply_text("Tell me what you want, for example: something under 700 calories with plenty of protein and not too much fat.")
+        await update.message.reply_text(_HELP_TEXT)
     except httpx.HTTPError:
         await update.message.reply_text("FoodPilot is temporarily unavailable. Please try again later.")
 

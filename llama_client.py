@@ -11,7 +11,7 @@ from llama_cloud import LlamaCloud
 from pydantic import BaseModel, Field
 
 try:
-	import fitz  # PyMuPDF
+	import fitz
 except Exception:
 	fitz = None
 
@@ -221,14 +221,12 @@ def parse_pdf(pdf_bytes: bytes, filename: str) -> str:
 			return "\n".join(page.text for page in content.pages if page.text).strip()
 		text = ""
 		if content:
-			# fallback generic string coercion
 			try:
 				text = str(content)
 			except Exception:
 				text = ""
 		if text:
 			return text.strip()
-		# final fallback: attempt a local OCR pass if available
 		ocr_text = _local_ocr_from_pdf(pdf_bytes)
 		return ocr_text or ""
 	finally:

@@ -75,21 +75,29 @@ def to_menu_item(item: dict) -> MenuItem:
 def is_drink(item: dict) -> bool:
     name = item_name(item).lower()
     normalized_name = " ".join(filter(None, __import__("re").sub(r"[^a-z0-9]+", " ", name).split()))
+    tokens = normalized_name.split()
     restaurant = str(item.get("restaurant") or "").lower()
-    food_exclusions = ("biscuit", "cookie", "muffin", "bagel", "donut", "pastry")
-    if any(marker in normalized_name.split() for marker in food_exclusions):
+    food_exclusions = (
+        "biscuit", "cookie", "muffin", "bagel", "donut", "pastry", "timbit", "brownie",
+        "croissant", "cake", "cone", "sundae", "eclair", "cruller", "danish", "pie",
+        "sandwich", "wrap", "burger", "syrup",
+    )
+    if any(marker in tokens for marker in food_exclusions):
         return False
     drink_markers = (
         "drink", "soda", "cola", "coke", "sprite", "tea", "lemonade", "milkshake", "coffee",
         "latte", "cappuccino", "espresso", "smoothie", "water", "juice", "frosty", "shake", "float",
         "iced tea", "sweet tea",
+        "milk", "americano", "mocha", "brew", "capp", "frappe", "freeze", "hot chocolate",
+        "iced capp", "iced latte", "iced coffee", "cold brew", "root beer", "ginger ale",
+        "fanta", "pepsi", "7up", "mountain dew", "mtn dew", "fruitopia", "dasani",
     )
     for marker in drink_markers:
         if " " in marker:
             if marker in normalized_name:
                 return True
         else:
-            if marker in normalized_name.split():
+            if marker in tokens:
                 return True
     return "drink" in restaurant
 
@@ -357,16 +365,20 @@ def build_meal_response(items: list[dict], goals: GoalInput) -> dict:
     drink = None
     for item in items:
         if is_drink(item):
-            drink = item
+            if drink is None:
+                drink = item
         elif item_role(item) == "main" and main is None:
             main = item
         elif item_role(item) in {"side", "addon"} and side is None:
             side = item
 
-    if main is None:
-        main = items[0]
-    if side is None and len(items) > 1:
-        side = next((item for item in items if item != main and not is_drink(item)), None)
+    non_drinks = [item for item in items if not is_drink(item)]
+    if main is None and non_drinks:
+        main = next((item for item in non_drinks if item is not side), non_drinks[0])
+    if side is None and len(non_drinks) > 1:
+        side = next((item for item in non_drinks if item is not main), None)
+    if main is not None and side is not None and main is side:
+        side = next((item for item in non_drinks if item is not main), None)
     if drink is None:
         drink = next((item for item in items if is_drink(item)), None)
 
