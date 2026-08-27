@@ -74,9 +74,10 @@ _MODERATE = (
 _MODERATE_RE = "|".join(f"(?:{phrase})" for phrase in _MODERATE)
 
 _QUALITATIVE_LIMITS = (
-    ("carbs", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_CARB_WORDS}\b|{_CARB_WORDS}\s*-?\s*(?:free|conscious)|\bketo\b|\blow\s*carb", 40.0),
-    ("fats", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_FAT_WORDS}\b|\blow\s*fat\b|\blean\b", 20.0),
-    ("kcal", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_KCAL_WORDS}\b|light\s+(?:meal|something)|small\s+meal|something\s+light|not\s+too\s+(?:heavy|big)", 700.0),
+    ("carbs", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_CARB_WORDS}\b|{_CARB_WORDS}\s*-?\s*(?:free|conscious)|\bketo\b|\blow\s*carb", 30.0),
+    ("fats", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_FAT_WORDS}\b|\blow\s*fat\b|\blean\b", 15.0),
+    ("kcal", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_KCAL_WORDS}\b|light\s+(?:meal|something)|small\s+meal|something\s+light|not\s+too\s+(?:heavy|big)", 600.0),
+    ("protein", rf"(?:{_MODERATE_RE})\s+{_FILLER}{_PROTEIN_WORDS}\b", 20.0),
 )
 
 _PROTEIN_PRIORITY = (
@@ -90,7 +91,7 @@ _PROTEIN_PRIORITY = (
     r"more\s+protein",
     r"protein[-\s]?(?:heavy|rich|packed|focused)",
     r"protein\s+heavy",
-    r"loaded\s+with\s+protein",
+    r"l[oi]aded\s+with\s+protein",
     r"full\s+of\s+protein",
     r"good\s+(?:amount\s+of\s+|source\s+of\s+)protein",
     r"decent\s+(?:amount\s+of\s+)protein",
@@ -102,6 +103,15 @@ _PROTEIN_PRIORITY = (
     r"muscle\s+(?:building|gain)",
 )
 _PROTEIN_PRIORITY_RE = "|".join(f"(?:{phrase})" for phrase in _PROTEIN_PRIORITY)
+_NEGATION_RE = re.compile(r"\bnot\b|\bno\b|n't\b|\bwithout\b|\bhardly\b|\bbarely\b")
+
+
+def _has_unnegated_protein_priority(lowered: str) -> bool:
+    for match in re.finditer(_PROTEIN_PRIORITY_RE, lowered):
+        prefix = lowered[max(0, match.start() - 15):match.start()]
+        if not _NEGATION_RE.search(prefix):
+            return True
+    return False
 
 
 def parse_goals(text: str) -> dict:
@@ -139,7 +149,7 @@ def parse_goals(text: str) -> dict:
         if field_name not in goals and re.search(pattern, lowered):
             goals[field_name] = ceiling
 
-    if re.search(_PROTEIN_PRIORITY_RE, lowered):
+    if _has_unnegated_protein_priority(lowered):
         goals["maximize_protein"] = True
 
     if not goals:

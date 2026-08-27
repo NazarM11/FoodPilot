@@ -107,9 +107,64 @@ def is_condiment(item: dict) -> bool:
     normalized_name = " ".join(filter(None, __import__("re").sub(r"[^a-z0-9]+", " ", name).split()))
     markers = (
         "sauce", "dressing", "dip", "ketchup", "mustard", "mayo", "mayonnaise",
-        "gravy", "peanut butter", "jam", "jelly", "syrup", "spread", "butter", "margarine",
+        "gravy", "peanut butter", "jam", "jelly", "syrup", "spread", "butter", "margarine", "sour cream",
     )
     return any(marker in normalized_name for marker in markers)
+
+
+def is_component(item: dict) -> bool:
+    name = item_name(item).lower()
+    normalized_name = " ".join(filter(None, re.sub(r"[^a-z0-9]+", " ", name).split()))
+    if normalized_name.startswith("sub "):
+        return True
+    exact = {
+        "italian cheese",
+        "american cheese",
+        "emmental cheese",
+        "monterey jack cheese",
+        "shredded cheese",
+        "small patty",
+        "large patty",
+        "premium bun",
+        "value bun",
+        "lettuce as bun",
+        "tomato sliced",
+        "tomato diced",
+        "cream crackers",
+        "cranberries",
+        "chives",
+        "creamer",
+        "sugar",
+        "sweetener packets",
+        "sausage",
+        "wheat flour tortilla",
+    }
+    if normalized_name in exact:
+        return True
+    if normalized_name.startswith("cheese shredded cheddar"):
+        return True
+    if normalized_name.startswith("frozen avocado"):
+        return True
+    markers = (
+        " packet",
+        " bulk ",
+        " bulk",
+        "whole",
+        " topped side",
+    )
+    return any(marker in normalized_name for marker in markers)
+
+
+def filtered_drinks(drinks: list[dict], goals: GoalInput) -> list[dict]:
+    if goals.kcal is not None and goals.kcal <= 700:
+        no_frosty = [drink for drink in drinks if "frosty" not in item_name(drink).lower()]
+        if no_frosty:
+            drinks = no_frosty
+    if goals.kcal is None:
+        return drinks
+    kcal_cap = max(120.0, goals.kcal * 0.45)
+    capped = [drink for drink in drinks if item_value(drink, "kcal") <= kcal_cap]
+    return capped or drinks
 
 
 def item_role(item: dict) -> str:
@@ -117,6 +172,8 @@ def item_role(item: dict) -> str:
         return "drink"
     if is_condiment(item):
         return "condiment"
+    if is_component(item):
+        return "component"
     protein = item_value(item, "protein")
     carbs = item_value(item, "carbs")
     kcal = item_value(item, "kcal")
@@ -226,15 +283,18 @@ def generate_combo_candidates(
         restaurant_groups.append(restaurant_group)
     restaurant_groups.sort(key=lambda group: 0 if (group[0].get("restaurant") or "Unknown") == preferred_restaurant else 1)
 
-    fallback_drinks = [item for item in ranked if is_drink(item)]
+    fallback_drinks = filtered_drinks([item for item in ranked if is_drink(item)], goals)
     candidates = []
 
     for restaurant_items in restaurant_groups:
-        food_pool = [item for item in restaurant_items if not is_drink(item) and not is_condiment(item)]
+        food_pool = [
+            item for item in restaurant_items
+            if not is_drink(item) and not is_condiment(item) and not is_component(item)
+        ]
         if not food_pool:
             continue
 
-        drink_pool = [item for item in restaurant_items if is_drink(item)]
+        drink_pool = filtered_drinks([item for item in restaurant_items if is_drink(item)], goals)
         if not drink_pool:
             drink_pool = fallback_drinks
 
@@ -372,7 +432,7 @@ def build_meal_response(items: list[dict], goals: GoalInput) -> dict:
         elif item_role(item) in {"side", "addon"} and side is None:
             side = item
 
-    non_drinks = [item for item in items if not is_drink(item)]
+    non_drinks = [item for item in items if not is_drink(item) and not is_component(item) and not is_condiment(item)]
     if main is None and non_drinks:
         main = next((item for item in non_drinks if item is not side), non_drinks[0])
     if side is None and len(non_drinks) > 1:

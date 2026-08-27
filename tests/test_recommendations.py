@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from llama_client import NutritionLabel
 from main import GoalInput, app, combo_fits, is_condiment, is_drink
+from recommendation_engine import generate_combo_candidates
 from telegram_bot import format_response, parse_goals
 
 client = TestClient(app)
@@ -52,6 +53,29 @@ def test_meal_response_never_puts_drink_in_main_or_side():
     assert meal["side"] != smoothie["item_name"]
     assert meal["main"] != milk["item_name"]
     assert meal["side"] != milk["item_name"]
+
+
+def test_generate_candidates_excludes_component_rows_and_high_calorie_drinks():
+    goals = GoalInput(kcal=600, fats=20, maximize_protein=True)
+    items = [
+        {"restaurant": "Wendy's", "item_name": "Sub Grilled", "calories": 93, "protein": 19, "carbs": 0, "fats": 1.9},
+        {"restaurant": "Wendy's", "item_name": "Italian Cheese", "calories": 82, "protein": 7, "carbs": 0, "fats": 6},
+        {"restaurant": "Wendy's", "item_name": "Large Chocolate Frosty", "calories": 407, "protein": 12, "carbs": 65, "fats": 11},
+        {"restaurant": "Wendy's", "item_name": "Diet Coke", "calories": 0, "protein": 0, "carbs": 0, "fats": 0},
+        {"restaurant": "Wendy's", "item_name": "Grilled Chicken", "calories": 337, "protein": 26, "carbs": 35, "fats": 10},
+        {"restaurant": "Wendy's", "item_name": "Medium Fries", "calories": 176, "protein": 2, "carbs": 22, "fats": 8.5},
+        {"restaurant": "Wendy's", "item_name": "Apple Slices", "calories": 42, "protein": 0, "carbs": 9, "fats": 0},
+    ]
+
+    candidates = generate_combo_candidates(items, goals)
+
+    assert candidates
+    for candidate in candidates:
+        names = [item["item_name"] for item in candidate["items"]]
+        assert "Sub Grilled" not in names
+        assert "Italian Cheese" not in names
+        assert "Large Chocolate Frosty" not in names
+        assert all("frosty" not in name.lower() for name in names)
 
 
 def test_recommendations_returns_ranked_matches(monkeypatch):
@@ -225,26 +249,26 @@ def test_parse_goals_accepts_natural_language():
     assert parse_goals("I want something for max 700 cals with preferably 40 protein and not too much carbs") == {
         "kcal": 700.0,
         "protein": 40.0,
-        "carbs": 40.0,
+        "carbs": 30.0,
     }
 
 
 def test_parse_goals_accepts_maximum_protein_request():
     assert parse_goals("Something under 600 cals, as much protein as possible, not too much carbs") == {
         "kcal": 600.0,
-        "carbs": 40.0,
+        "carbs": 30.0,
         "maximize_protein": True,
     }
 
 
 def test_parse_goals_handles_carbs_typo():
-    assert parse_goals("Something under 600 cals, as much protein as possible, not to much carbs")["carbs"] == 40.0
+    assert parse_goals("Something under 600 cals, as much protein as possible, not to much carbs")["carbs"] == 30.0
 
 
 def test_parse_goals_understands_plain_language_protein_preference():
     assert parse_goals("something under 700 calories with plenty of protein and not too much fat") == {
         "kcal": 700.0,
-        "fats": 20.0,
+        "fats": 15.0,
         "maximize_protein": True,
     }
 
@@ -259,34 +283,53 @@ def test_parse_goals_accepts_positional_shorthand():
 
 
 def test_parse_goals_too_much_and_not_much_variants():
-    assert parse_goals("too much carbs") == {"carbs": 40.0}
-    assert parse_goals("not much fat") == {"fats": 20.0}
-    assert parse_goals("way too much fat") == {"fats": 20.0}
-    assert parse_goals("not that much carbs") == {"carbs": 40.0}
-    assert parse_goals("without too many carbs") == {"carbs": 40.0}
-    assert parse_goals("too many calories") == {"kcal": 700.0}
+    assert parse_goals("too much carbs") == {"carbs": 30.0}
+    assert parse_goals("not much fat") == {"fats": 15.0}
+    assert parse_goals("way too much fat") == {"fats": 15.0}
+    assert parse_goals("not that much carbs") == {"carbs": 30.0}
+    assert parse_goals("without too many carbs") == {"carbs": 30.0}
+    assert parse_goals("too many calories") == {"kcal": 600.0}
 
 
 def test_parse_goals_qualitative_phrases():
-    assert parse_goals("go easy on the carbs") == {"carbs": 40.0}
-    assert parse_goals("watch my fat") == {"fats": 20.0}
-    assert parse_goals("cutting back on carbs") == {"carbs": 40.0}
-    assert parse_goals("low carb") == {"carbs": 40.0}
-    assert parse_goals("keto") == {"carbs": 40.0}
-    assert parse_goals("something light") == {"kcal": 700.0}
-    assert parse_goals("a little fat") == {"fats": 20.0}
+    assert parse_goals("go easy on the carbs") == {"carbs": 30.0}
+    assert parse_goals("watch my fat") == {"fats": 15.0}
+    assert parse_goals("cutting back on carbs") == {"carbs": 30.0}
+    assert parse_goals("low carb") == {"carbs": 30.0}
+    assert parse_goals("keto") == {"carbs": 30.0}
+    assert parse_goals("something light") == {"kcal": 600.0}
+    assert parse_goals("a little fat") == {"fats": 15.0}
 
 
 def test_parse_goals_protein_priority_synonyms():
-    assert parse_goals("light on fat, lots of protein") == {"fats": 20.0, "maximize_protein": True}
+    assert parse_goals("light on fat, lots of protein") == {"fats": 15.0, "maximize_protein": True}
     assert parse_goals("protein packed") == {"maximize_protein": True}
     assert parse_goals("post-workout meal") == {"maximize_protein": True}
     assert parse_goals("building muscle") == {"maximize_protein": True}
 
 
 def test_parse_goals_numbers_override_qualitative():
-    assert parse_goals("50g carbs, not too much fat") == {"carbs": 50.0, "fats": 20.0}
+    assert parse_goals("50g carbs, not too much fat") == {"carbs": 50.0, "fats": 15.0}
     assert parse_goals("under 500 calories, something light") == {"kcal": 500.0}
+
+
+def test_parse_goals_not_a_lot_of_protein_sets_ceiling_not_maximize():
+    assert parse_goals("not a lot of protein") == {"protein": 20.0}
+    assert parse_goals("not a lot of carbs, loaded with protein, 20 fats at most") == {
+        "carbs": 30.0,
+        "fats": 20.0,
+        "maximize_protein": True,
+    }
+    assert parse_goals("not a lot of cals, loaded with protein, 20 fats at most") == {
+        "kcal": 600.0,
+        "fats": 20.0,
+        "maximize_protein": True,
+    }
+    assert parse_goals("not a lot of carbs, liaded with protein, 20 fats at most") == {
+        "carbs": 30.0,
+        "fats": 20.0,
+        "maximize_protein": True,
+    }
 
 
 def test_parse_goals_rejects_unparsable_text():
